@@ -128,7 +128,7 @@ include_directories(
 
 ## Declare a C++ executable
 # add_executable(crop_height_node src/crop_height_node.cpp)
-add_executable(crop_height src/CalcHeight.cpp)
+add_executable(crop_height src/calc_height.cpp)
 
 ## Add cmake target dependencies of the executable
 ## same as for the library above

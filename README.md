@@ -19,8 +19,8 @@ To run this package
 
 	1. start roscore
 
-	2. make sure mavros and RPLidar node are running
+	2. make sure mavros node is running
 
-	3. run 'rosrun crop_height crop_height'
+	3. run 'rosrun crop_height crop_height' or 'roslaunch crop_height crop_height.launch'
 
 The height to the ground is published in the rostopic crop_dist

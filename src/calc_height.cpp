@@ -75,6 +75,7 @@ void Scan::scanCallBack(const sensor_msgs::LaserScan::ConstPtr& scan)
 {
 	/* use the beam facing downwards to calculate the average height */
 	float sum = 0;												/* sum of available distances detected */
+	float intensities = 0;
 	int count = 0;												/* number of available distances detected */
 	int scan_angle = 30;										/* angle used for calculation in deg */
 
@@ -102,14 +103,15 @@ void Scan::scanCallBack(const sensor_msgs::LaserScan::ConstPtr& scan)
 			float angle = DEG2RAD(i);
 
 			/* the distance to the crop is z in the ground frame */
-			sum += scan->ranges[i] * sin(angle + pitch) * cos(roll);
+			sum += scan->ranges[i] * sin(angle + pitch) * cos(roll) * scan->intensities[i];
+			intensities += scan->intensities[i];
 			count++;
 		}		
 	}
 
 	/* publish the distance to the crop in Distance */
 	std_msgs::Float32 Distance;
-	Distance.data = sum / count;
+	Distance.data = sum / count / intensities;
 	CropDistance.publish(Distance);
 	ROS_INFO("distance:%f \nroll:%f \npitch%f \n",Distance.data, roll, pitch);
 }

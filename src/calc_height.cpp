@@ -6,6 +6,7 @@
 
 /* inline function to convert deg into rad */
 #define DEG2RAD(x) ((x)*M_PI/180.)
+#define RAD2DEG(x) ((x)*180./M_PI)
 
 /* offset of the laser rangefinder */
 float offset[] = {0.0f, 0.0f, 0.0f};
@@ -58,7 +59,7 @@ Scan::Scan()
 {
 	CropDistance = n.advertise<std_msgs::Float32>("/crop_dist", 1);																/* publish the distance to the crop */
 	scan_sub = n.subscribe<sensor_msgs::LaserScan>("/scan", 1, &Scan::scanCallBack, this);									/* when the data of Laser rangefinder comes, trigger the callback function */
-	pose_sub = n.subscribe<geometry_msgs::PoseStamped>("/mavros/local_position/pose", 1, &Scan::poseCallBack, this);		/* subscribe the data of the pose of the drone for correcting the height */
+	pose_sub = n.subscribe<geometry_msgs::PoseStamped>("/mavros/local_position/local", 1, &Scan::poseCallBack, this);		/* subscribe the data of the pose of the drone for correcting the height */
 }
 
 void Scan::poseCallBack(const geometry_msgs::PoseStamped::ConstPtr& pose)
@@ -77,27 +78,31 @@ void Scan::scanCallBack(const sensor_msgs::LaserScan::ConstPtr& scan)
 	int count = 0;												/* number of available distances detected */
 	int scan_angle = 30;										/* angle used for calculation in deg */
 
+	float roll = atan2(2*(q.q0*q.q1 + q.q2*q.q3), 1 - 2*(q.q1*q.q1 + q.q2*q.q2));
+	float pitch = asin(2*(q.q0*q.q2 - q.q3*q.q1));
+			
+	/* convert the coordinate of laser rangefinder from body frame into ground frame */
+	Quaternion p_body;
+	p_body.q0 = 0;
+	p_body.q1 = offset[0];
+	p_body.q2 = offset[1];
+	p_body.q3 = offset[2];
+
+	Quaternion p_ground;
+	p_ground = q_mult(q_mult(q_inv(q), p_body), q);
+
+	float z_offset = p_ground.q3;
+
 	/* only take the values within the set range */
-	for (int i = 90 - scan_angle/2; i < 90 + scan_angle/2; i++)
+	for (int i = 90 - scan_angle/2 - RAD2DEG(pitch); i < 90 + scan_angle/2 - RAD2DEG(pitch); i++)
 	{
 		/* only take the values between the minimum and maximum value of the laser rangefinder */
 		if (scan->ranges[i]>scan->range_min && scan->ranges[i]<scan->range_max)
 		{
 			float angle = DEG2RAD(i);
 
-			/* convert the distances from the laser rangefinder into coordinates in the body frame */
-			Quaternion p_body;
-			p_body.q0 = 0;
-			p_body.q1 = offset[0];
-			p_body.q2 = offset[1] + scan->ranges[i] * cos(angle);
-			p_body.q3 = offset[2] - scan->ranges[i] * sin(angle);
-
-			/* convert the coordinates in body frame into ground frame */
-			Quaternion p_ground;
-			p_ground = q_mult(q_mult(q_inv(q), p_body), q);
-
 			/* the distance to the crop is z in the ground frame */
-			sum += p_ground.q3;
+			sum += scan->ranges[i] * sin(angle + pitch) * cos(roll);
 			count++;
 		}		
 	}
@@ -106,6 +111,7 @@ void Scan::scanCallBack(const sensor_msgs::LaserScan::ConstPtr& scan)
 	std_msgs::Float32 Distance;
 	Distance.data = sum / count;
 	CropDistance.publish(Distance);
+	ROS_INFO("distance:%f \nroll:%f \npitch%f \n",Distance.data, roll, pitch);
 }
 
 int main(int argc, char **argv)

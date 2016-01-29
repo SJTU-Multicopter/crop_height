@@ -5,7 +5,13 @@
 #include <cmath>
 
 /* inline function to convert deg into rad */
+#ifndef DEG2RAD
 #define DEG2RAD(x) ((x)*M_PI/180.)
+#endif
+
+#ifndef RAD2DEG
+#define RAD2DEG(x) ((x)*180./M_PI)
+#endif
 
 /* offset of the laser rangefinder */
 float offset[] = {0.0f, 0.0f, 0.0f};
@@ -76,9 +82,12 @@ void Scan::scanCallBack(const sensor_msgs::LaserScan::ConstPtr& scan)
 	float sum = 0;												/* sum of available distances detected */
 	int count = 0;												/* number of available distances detected */
 	int scan_angle = 30;										/* angle used for calculation in deg */
+	float intensities = 0;
+
+	float pitch = atan2(2 * (q.q0 * q.q1 + q.q2 * q.q3), 1 - 2 * (q.q1 * q.q1 + q.q2 * q.q2));
 
 	/* only take the values within the set range */
-	for (int i = 90 - scan_angle/2; i < 90 + scan_angle/2; i++)
+	for (int i = 90 - scan_angle/2 - RAD2DEG(pitch); i < 90 + scan_angle/2 - RAD2DEG(pitch); i++)
 	{
 		/* only take the values between the minimum and maximum value of the laser rangefinder */
 		if (scan->ranges[i]>scan->range_min && scan->ranges[i]<scan->range_max)
@@ -97,15 +106,18 @@ void Scan::scanCallBack(const sensor_msgs::LaserScan::ConstPtr& scan)
 			p_ground = q_mult(q_mult(q_inv(q), p_body), q);
 
 			/* the distance to the crop is z in the ground frame */
-			sum += p_ground.q3;
+			sum += p_ground.q3 * scan->intensities[i];
 			count++;
+
+			intensities += scan->intensities[i];
 		}		
 	}
 
 	/* publish the distance to the crop in Distance */
 	std_msgs::Float32 Distance;
-	Distance.data = sum / count;
+	Distance.data = sum / (count * intensities);
 	CropDistance.publish(Distance);
+	ROS_INFO("pitch:\t%f \ndist:\t%f \n",RAD2DEG(pitch), Distance.data);
 }
 
 int main(int argc, char **argv)

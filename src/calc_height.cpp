@@ -29,10 +29,11 @@ struct Quaternion
 Quaternion q_inv(const Quaternion& _q)
 {
 	Quaternion qt;
-	qt.q0 = _q.q0;
-	qt.q1 = -_q.q1;
-	qt.q2 = -_q.q2;
-	qt.q3 = -_q.q3;
+	float l = _q.q0*_q.q0 + _q.q1*_q.q1 + _q.q2*_q.q2 + _q.q3*_q.q3;
+	qt.q0 = _q.q0/l;
+	qt.q1 = -_q.q1/l;
+	qt.q2 = -_q.q2/l;
+	qt.q3 = -_q.q3/l;
 	return qt;
 }
 
@@ -62,9 +63,9 @@ private:
 
 Scan::Scan()
 {
-	CropDistance = n.advertise<std_msgs::Float32>("/crop_dist", 1);																/* publish the distance to the crop */
-	scan_sub = n.subscribe<sensor_msgs::LaserScan>("/scan", 1, &Scan::scanCallBack, this);									/* when the data of Laser rangefinder comes, trigger the callback function */
-	pose_sub = n.subscribe<geometry_msgs::PoseStamped>("/mavros/local_position/pose", 1, &Scan::poseCallBack, this);		/* subscribe the data of the pose of the drone for correcting the height */
+	CropDistance = n.advertise<std_msgs::Float32>("/crop_dist", 100);																/* publish the distance to the crop */
+	scan_sub = n.subscribe<sensor_msgs::LaserScan>("/scan", 100, &Scan::scanCallBack, this);									/* when the data of Laser rangefinder comes, trigger the callback function */
+	pose_sub = n.subscribe<geometry_msgs::PoseStamped>("/mavros/local_position/pose", 100, &Scan::poseCallBack, this);		/* subscribe the data of the pose of the drone for correcting the height */
 }
 
 void Scan::poseCallBack(const geometry_msgs::PoseStamped::ConstPtr& pose)
@@ -84,7 +85,7 @@ void Scan::scanCallBack(const sensor_msgs::LaserScan::ConstPtr& scan)
 	int scan_angle = 30;										/* angle used for calculation in deg */
 	float intensities = 0;
 
-	float pitch = atan2(2 * (q.q0 * q.q1 + q.q2 * q.q3), 1 - 2 * (q.q1 * q.q1 + q.q2 * q.q2));
+	float pitch = asin(2 * (q.q0 * q.q2 - q.q3 * q.q1));
 
 	/* only take the values within the set range */
 	for (int i = 90 - scan_angle/2 - RAD2DEG(pitch); i < 90 + scan_angle/2 - RAD2DEG(pitch); i++)
@@ -97,27 +98,33 @@ void Scan::scanCallBack(const sensor_msgs::LaserScan::ConstPtr& scan)
 			/* convert the distances from the laser rangefinder into coordinates in the body frame */
 			Quaternion p_body;
 			p_body.q0 = 0;
-			p_body.q1 = offset[0];
-			p_body.q2 = offset[1] + scan->ranges[i] * cos(angle);
+			p_body.q1 = offset[0] + scan->ranges[i] * cos(angle);
+			p_body.q2 = -offset[1];
 			p_body.q3 = offset[2] - scan->ranges[i] * sin(angle);
 
 			/* convert the coordinates in body frame into ground frame */
 			Quaternion p_ground;
-			p_ground = q_mult(q_mult(q_inv(q), p_body), q);
+			p_ground = q_mult(q_mult(q, p_body), q_inv(q));
 
 			/* the distance to the crop is z in the ground frame */
-			sum += p_ground.q3 * scan->intensities[i];
+			sum += p_ground.q3;
 			count++;
 
-			intensities += scan->intensities[i];
+			//intensities += scan->intensities[i];
 		}		
 	}
 
 	/* publish the distance to the crop in Distance */
 	std_msgs::Float32 Distance;
-	Distance.data = sum / (count * intensities);
+	Distance.data = sum / (count);
+	if (Distance.data == Distance.data)
+	{}
+	else
+	{
+		Distance.data = -6.0f;
+	}
 	CropDistance.publish(Distance);
-	ROS_INFO("pitch:\t%f \ndist:\t%f \n",RAD2DEG(pitch), Distance.data);
+	ROS_INFO("\npitch:\t%f \ndist:\t%f \n",RAD2DEG(pitch), Distance.data);
 }
 
 int main(int argc, char **argv)

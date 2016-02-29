@@ -91,7 +91,7 @@ void Scan::scanCallBack(const sensor_msgs::LaserScan::ConstPtr& scan)
 	for (int i = 90 - scan_angle/2 - RAD2DEG(pitch); i < 90 + scan_angle/2 - RAD2DEG(pitch); i++)
 	{
 		/* only take the values between the minimum and maximum value of the laser rangefinder */
-		if (scan->ranges[i]>scan->range_min && scan->ranges[i]<scan->range_max)
+		if (scan->ranges[i]>scan->range_min && scan->ranges[i]<scan->range_max && isfinite(scan->ranges[i]) && !isnan(scan->ranges[i]))
 		{
 			float angle = DEG2RAD(i);
 

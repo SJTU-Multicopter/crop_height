@@ -14,7 +14,7 @@
 #endif
 
 /* offset of the laser rangefinder */
-float offset[] = {0.0f, 0.0f, 0.0f};
+float offset[] = {0.09f, -0.25f, 0.0f};
 
 /* struct to store quaternions */
 struct Quaternion
@@ -29,7 +29,7 @@ struct Quaternion
 Quaternion q_inv(const Quaternion& _q)
 {
 	Quaternion qt;
-	float l = _q.q0*_q.q0 + _q.q1*_q.q1 + _q.q2*_q.q2 + _q.q3*_q.q3;
+	float l = fsqrtf(_q.q0*_q.q0 + _q.q1*_q.q1 + _q.q2*_q.q2 + _q.q3*_q.q3);
 	qt.q0 = _q.q0/l;
 	qt.q1 = -_q.q1/l;
 	qt.q2 = -_q.q2/l;
@@ -99,7 +99,7 @@ void Scan::scanCallBack(const sensor_msgs::LaserScan::ConstPtr& scan)
 			Quaternion p_body;
 			p_body.q0 = 0;
 			p_body.q1 = offset[0] + scan->ranges[i] * cos(angle);
-			p_body.q2 = -offset[1];
+			p_body.q2 = offset[1];
 			p_body.q3 = offset[2] - scan->ranges[i] * sin(angle);
 
 			/* convert the coordinates in body frame into ground frame */

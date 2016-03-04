@@ -29,7 +29,7 @@ struct Quaternion
 Quaternion q_inv(const Quaternion& _q)
 {
 	Quaternion qt;
-	float l = fsqrtf(_q.q0*_q.q0 + _q.q1*_q.q1 + _q.q2*_q.q2 + _q.q3*_q.q3);
+	float l = sqrt(_q.q0*_q.q0 + _q.q1*_q.q1 + _q.q2*_q.q2 + _q.q3*_q.q3);
 	qt.q0 = _q.q0/l;
 	qt.q1 = -_q.q1/l;
 	qt.q2 = -_q.q2/l;

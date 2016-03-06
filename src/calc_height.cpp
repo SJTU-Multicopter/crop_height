@@ -2,6 +2,7 @@
 #include "std_msgs/Float32.h"
 #include <sensor_msgs/LaserScan.h>
 #include <geometry_msgs/PoseStamped.h>
+#include <geometry_msgs/TwistStamped.h>
 #include <cmath>
 
 /* inline function to convert deg into rad */
@@ -55,20 +56,25 @@ class Scan{
 public:
 	Scan();
 	Quaternion q;
+	float vel[3];
 private:
 	ros::NodeHandle n;
+		ros::Publisher yaw_pub;
+		ros::Publisher dir_pub;
 		ros::Publisher CropDistance;										/* publish the distance to the crop */
 		ros::Subscriber scan_sub;											/* subscribe the Lidar data */
 		ros::Subscriber pose_sub;											/* subscribe mavros data (pose of the drone) */
+		ros::Subscriber vel_sub;
 	void scanCallBack(const sensor_msgs::LaserScan::ConstPtr& scan);		/* prototype of the callback function for Lidar messages */
 	void poseCallBack(const geometry_msgs::PoseStamped::ConstPtr& pose);	/* prototype of the callback function for pose messages */
+	void velCallBack(const geometry_msgs::TwistStamped::ConstPtr& velocity);
 };
 
 Scan::Scan()
 {
-	CropDistance = n.advertise<std_msgs::Float32>("/crop_dist", 100);																/* publish the distance to the crop */
-	scan_sub = n.subscribe<sensor_msgs::LaserScan>("/scan", 100, &Scan::scanCallBack, this);									/* when the data of Laser rangefinder comes, trigger the callback function */
-	pose_sub = n.subscribe<geometry_msgs::PoseStamped>("/mavros/local_position/pose", 100, &Scan::poseCallBack, this);		/* subscribe the data of the pose of the drone for correcting the height */
+	CropDistance = n.advertise<std_msgs::Float32>("/crop_dist", 5);																/* publish the distance to the crop */
+	scan_sub = n.subscribe<sensor_msgs::LaserScan>("/scan", 5, &Scan::scanCallBack, this);									/* when the data of Laser rangefinder comes, trigger the callback function */
+	pose_sub = n.subscribe<geometry_msgs::PoseStamped>("/mavros/local_position/pose", 5, &Scan::poseCallBack, this);		/* subscribe the data of the pose of the drone for correcting the height */
 }
 
 void Scan::poseCallBack(const geometry_msgs::PoseStamped::ConstPtr& pose)
@@ -80,6 +86,12 @@ void Scan::poseCallBack(const geometry_msgs::PoseStamped::ConstPtr& pose)
 	q.q0 = pose->pose.orientation.w;
 }
 
+void Scan::velCallBack(const geometry_msgs::TwistStamped::ConstPtr& velocity)
+{
+	vel[0] = velocity->twist.linear.x;
+	vel[1] = velocity->twist.linear.y;
+	vel[2] = velocity->twist.linear.z;
+}
 void Scan::scanCallBack(const sensor_msgs::LaserScan::ConstPtr& scan)
 {
 	/* use the beam facing downwards to calculate the average height */
@@ -177,15 +189,72 @@ void Scan::scanCallBack(const sensor_msgs::LaserScan::ConstPtr& scan)
 	
 	float height = sum/count;
 
+	if (forward)
+	{
+		for (int i = 90 - scan_angle/2 - pred_angle; i < 90 - scan_angle/2; i++)
+		{
+			if (scan->ranges[i]>scan->range_min && scan->ranges[i]<scan->range_max)
+			{
+				float angle = DEG2RAD(i);
+
+				/* convert the distances from the laser rangefinder into coordinates in the body frame */
+				Quaternion p_body;
+				p_body.q0 = 0;
+				p_body.q1 = offset[0];
+				p_body.q2 = offset[1] + scan->ranges[i] * cos(angle);
+				p_body.q3 = offset[2] - scan->ranges[i] * sin(angle);
+
+				/* convert the coordinates in body frame into ground frame */
+				Quaternion p_ground;
+				p_ground = q_mult(q_mult(q_inv(q), p_body), q);
+
+				/* the distance to the crop is z in the ground frame */
+				pred_sum += p_ground.q3;
+				pred_count++;
+			}
+		}
+	}
+
+	if (backward)
+	{
+		for (int i = 90 + scan_angle/2; i < 90 + scan_angle/2 + pred_angle; i++)
+		{
+			if (scan->ranges[i]>scan->range_min && scan->ranges[i]<scan->range_max)
+			{
+				float angle = DEG2RAD(i);
+
+				/* convert the distances from the laser rangefinder into coordinates in the body frame */
+				Quaternion p_body;
+				p_body.q0 = 0;
+				p_body.q1 = offset[0];
+				p_body.q2 = offset[1] + scan->ranges[i] * cos(angle);
+				p_body.q3 = offset[2] - scan->ranges[i] * sin(angle);
+
+				/* convert the coordinates in body frame into ground frame */
+				Quaternion p_ground;
+				p_ground = q_mult(q_mult(q_inv(q), p_body), q);
+
+				/* the distance to the crop is z in the ground frame */
+				pred_sum += p_ground.q3;
+				pred_count++;
+			}
+		}
+	}
+
+	float dir_dist = sum/count;
+	float pred_dist = pred_sum/pred_count;
+
 	/* publish the distance to the crop in Distance */
 	std_msgs::Float32 Distance;
 	Distance.data = height * (1 - pred_p) + pred_height * pred_p;
+	
 	if (Distance.data == Distance.data)
 	{}
 	else
 	{
 		Distance.data = -6.0f;
 	}
+	
 	CropDistance.publish(Distance);
 	ROS_INFO("\npitch:\t%f \ndist:\t%f \n",RAD2DEG(pitch), Distance.data);
 }

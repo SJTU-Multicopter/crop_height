@@ -18,7 +18,7 @@
 float offset[] = {0.09f, -0.25f, 0.0f};
 
 /* proportion of predicted height for estimation */
-float pred_p = 0.5f;
+//float pred_p = 0.5f;
 
 /* struct to store quaternions */
 struct Quaternion
@@ -59,12 +59,9 @@ public:
 	float vel[3];
 private:
 	ros::NodeHandle n;
-		ros::Publisher yaw_pub;
-		ros::Publisher dir_pub;
 		ros::Publisher CropDistance;										/* publish the distance to the crop */
 		ros::Subscriber scan_sub;											/* subscribe the Lidar data */
 		ros::Subscriber pose_sub;											/* subscribe mavros data (pose of the drone) */
-		ros::Subscriber vel_sub;
 	void scanCallBack(const sensor_msgs::LaserScan::ConstPtr& scan);		/* prototype of the callback function for Lidar messages */
 	void poseCallBack(const geometry_msgs::PoseStamped::ConstPtr& pose);	/* prototype of the callback function for pose messages */
 	void velCallBack(const geometry_msgs::TwistStamped::ConstPtr& velocity);
@@ -86,12 +83,6 @@ void Scan::poseCallBack(const geometry_msgs::PoseStamped::ConstPtr& pose)
 	q.q0 = pose->pose.orientation.w;
 }
 
-void Scan::velCallBack(const geometry_msgs::TwistStamped::ConstPtr& velocity)
-{
-	vel[0] = velocity->twist.linear.x;
-	vel[1] = velocity->twist.linear.y;
-	vel[2] = velocity->twist.linear.z;
-}
 void Scan::scanCallBack(const sensor_msgs::LaserScan::ConstPtr& scan)
 {
 	/* use the beam facing downwards to calculate the average height */
@@ -103,63 +94,79 @@ void Scan::scanCallBack(const sensor_msgs::LaserScan::ConstPtr& scan)
 	bool backward = false;
 	float pred_sum = 0;
 	float pred_count = 0;
+	float pred_height = 0;
+	float pred_p = 0.5f;
 //	float intensities = 0;
 
 	float pitch = asin(2 * (q.q0 * q.q2 - q.q3 * q.q1));
-	
+
 	if (pitch > 0.15f)
 		forward = true;
 	if (pitch < -0.15f)
 		backward = true;
-		
+
 	if (forward)
 	{
 		for (int i = 90 - RAD2DEG(pitch) - scan_angle/2 - pred_angle; i < 90 - scan_angle/2 - RAD2DEG(pitch); i++)
 		{
-			float angle = DEG2RAD(i);
+			if(scan->ranges[i]>scan->range_min && scan->ranges[i]<scan->range_max)
+			{
+				float angle = DEG2RAD(i);
 
-			/* convert the distances from the laser rangefinder into coordinates in the body frame */
-			Quaternion p_body;
-			p_body.q0 = 0;
-			p_body.q1 = offset[0] + scan->ranges[i] * cos(angle);
-			p_body.q2 = offset[1];
-			p_body.q3 = offset[2] - scan->ranges[i] * sin(angle);
+				/* convert the distances from the laser rangefinder into coordinates in the body frame */
+				Quaternion p_body;
+				p_body.q0 = 0;
+				p_body.q1 = offset[0] + scan->ranges[i] * cos(angle);
+				p_body.q2 = offset[1];
+				p_body.q3 = offset[2] - scan->ranges[i] * sin(angle);
 
-			/* convert the coordinates in body frame into ground frame */
-			Quaternion p_ground;
-			p_ground = q_mult(q_mult(q, p_body), q_inv(q));
+				/* convert the coordinates in body frame into ground frame */
+				Quaternion p_ground;
+				p_ground = q_mult(q_mult(q, p_body), q_inv(q));
 
-			/* the distance to the crop is z in the ground frame */
-			pred_sum += p_ground.q3;
-			pred_count++;
+				/* the distance to the crop is z in the ground frame */
+				pred_sum += p_ground.q3;
+				pred_count++;
+			}
 		}
 	}
-	
+
 	if (backward)
 	{
 		for (int i = 90 - RAD2DEG(pitch) + scan_angle/2; i < 90 - RAD2DEG(pitch) + scan_angle/2 + pred_angle; i++)
 		{
-			float angle = DEG2RAD(i);
+			if(scan->ranges[i]>scan->range_min && scan->ranges[i]<scan->range_max)
+			{
+				float angle = DEG2RAD(i);
 
-			/* convert the distances from the laser rangefinder into coordinates in the body frame */
-			Quaternion p_body;
-			p_body.q0 = 0;
-			p_body.q1 = offset[0] + scan->ranges[i] * cos(angle);
-			p_body.q2 = offset[1];
-			p_body.q3 = offset[2] - scan->ranges[i] * sin(angle);
+				/* convert the distances from the laser rangefinder into coordinates in the body frame */
+				Quaternion p_body;
+				p_body.q0 = 0;
+				p_body.q1 = offset[0] + scan->ranges[i] * cos(angle);
+				p_body.q2 = offset[1];
+				p_body.q3 = offset[2] - scan->ranges[i] * sin(angle);
 
-			/* convert the coordinates in body frame into ground frame */
-			Quaternion p_ground;
-			p_ground = q_mult(q_mult(q, p_body), q_inv(q));
+				/* convert the coordinates in body frame into ground frame */
+				Quaternion p_ground;
+				p_ground = q_mult(q_mult(q, p_body), q_inv(q));
 
-			/* the distance to the crop is z in the ground frame */
-			pred_sum += p_ground.q3;
-			pred_count++;
+				/* the distance to the crop is z in the ground frame */
+				pred_sum += p_ground.q3;
+				pred_count++;
+			}
 		}
 	}
-	
-	float pred_height = pred_sum/pred_count;
-	
+
+	if (pred_count > 0)
+	{
+		pred_height = pred_sum/pred_count;
+	}
+	else
+	{
+		pred_height = 0.0f;
+		pred_p = 0;
+	}
+
 	/* only take the values within the set range */
 	for (int i = 90 - scan_angle/2 - RAD2DEG(pitch); i < 90 + scan_angle/2 - RAD2DEG(pitch); i++)
 	{
@@ -184,77 +191,22 @@ void Scan::scanCallBack(const sensor_msgs::LaserScan::ConstPtr& scan)
 			count++;
 
 			//intensities += scan->intensities[i];
-		}		
+		}
 	}
-	
+
 	float height = sum/count;
-
-	if (forward)
-	{
-		for (int i = 90 - scan_angle/2 - pred_angle; i < 90 - scan_angle/2; i++)
-		{
-			if (scan->ranges[i]>scan->range_min && scan->ranges[i]<scan->range_max)
-			{
-				float angle = DEG2RAD(i);
-
-				/* convert the distances from the laser rangefinder into coordinates in the body frame */
-				Quaternion p_body;
-				p_body.q0 = 0;
-				p_body.q1 = offset[0];
-				p_body.q2 = offset[1] + scan->ranges[i] * cos(angle);
-				p_body.q3 = offset[2] - scan->ranges[i] * sin(angle);
-
-				/* convert the coordinates in body frame into ground frame */
-				Quaternion p_ground;
-				p_ground = q_mult(q_mult(q_inv(q), p_body), q);
-
-				/* the distance to the crop is z in the ground frame */
-				pred_sum += p_ground.q3;
-				pred_count++;
-			}
-		}
-	}
-
-	if (backward)
-	{
-		for (int i = 90 + scan_angle/2; i < 90 + scan_angle/2 + pred_angle; i++)
-		{
-			if (scan->ranges[i]>scan->range_min && scan->ranges[i]<scan->range_max)
-			{
-				float angle = DEG2RAD(i);
-
-				/* convert the distances from the laser rangefinder into coordinates in the body frame */
-				Quaternion p_body;
-				p_body.q0 = 0;
-				p_body.q1 = offset[0];
-				p_body.q2 = offset[1] + scan->ranges[i] * cos(angle);
-				p_body.q3 = offset[2] - scan->ranges[i] * sin(angle);
-
-				/* convert the coordinates in body frame into ground frame */
-				Quaternion p_ground;
-				p_ground = q_mult(q_mult(q_inv(q), p_body), q);
-
-				/* the distance to the crop is z in the ground frame */
-				pred_sum += p_ground.q3;
-				pred_count++;
-			}
-		}
-	}
-
-	float dir_dist = sum/count;
-	float pred_dist = pred_sum/pred_count;
 
 	/* publish the distance to the crop in Distance */
 	std_msgs::Float32 Distance;
 	Distance.data = height * (1 - pred_p) + pred_height * pred_p;
-	
+
 	if (Distance.data == Distance.data)
 	{}
 	else
 	{
 		Distance.data = -6.0f;
 	}
-	
+
 	CropDistance.publish(Distance);
 	ROS_INFO("\npitch:\t%f \ndist:\t%f \n",RAD2DEG(pitch), Distance.data);
 }

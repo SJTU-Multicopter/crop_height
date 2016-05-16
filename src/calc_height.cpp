@@ -61,20 +61,20 @@ private:
 	ros::NodeHandle n;
 		ros::Publisher yaw_pub;
 		ros::Publisher dir_pub;
-		ros::Publisher CropDistance;										/* publish the distance to the crop */
+		ros::Publisher CropDistance;											/* publish the distance to the crop */
 		ros::Subscriber scan_sub;											/* subscribe the Lidar data */
 		ros::Subscriber pose_sub;											/* subscribe mavros data (pose of the drone) */
-		ros::Subscriber vel_sub;
-	void scanCallBack(const sensor_msgs::LaserScan::ConstPtr& scan);		/* prototype of the callback function for Lidar messages */
-	void poseCallBack(const geometry_msgs::PoseStamped::ConstPtr& pose);	/* prototype of the callback function for pose messages */
-	void velCallBack(const geometry_msgs::TwistStamped::ConstPtr& velocity);
+		ros::Subscriber vel_sub;											/* subscribe velocity data */
+	void scanCallBack(const sensor_msgs::LaserScan::ConstPtr& scan);							/* prototype of the callback function for Lidar messages */
+	void poseCallBack(const geometry_msgs::PoseStamped::ConstPtr& pose);							/* prototype of the callback function for pose messages */
+	void velCallBack(const geometry_msgs::TwistStamped::ConstPtr& velocity);						/* prototype of the callback function for velocity messages */
 };
 
 Scan::Scan()
 {
-	CropDistance = n.advertise<std_msgs::Float32>("/crop_dist", 5);																/* publish the distance to the crop */
-	scan_sub = n.subscribe<sensor_msgs::LaserScan>("/scan", 5, &Scan::scanCallBack, this);									/* when the data of Laser rangefinder comes, trigger the callback function */
-	pose_sub = n.subscribe<geometry_msgs::PoseStamped>("/mavros/local_position/pose", 5, &Scan::poseCallBack, this);		/* subscribe the data of the pose of the drone for correcting the height */
+	CropDistance = n.advertise<std_msgs::Float32>("/crop_dist", 5);								/* publish the distance to the crop */
+	scan_sub = n.subscribe<sensor_msgs::LaserScan>("/scan", 5, &Scan::scanCallBack, this);					/* when the data of Laser rangefinder comes, trigger the callback function */
+	pose_sub = n.subscribe<geometry_msgs::PoseStamped>("/mavros/local_position/pose", 5, &Scan::poseCallBack, this);	/* subscribe the data of the pose of the drone for correcting the height */
 }
 
 void Scan::poseCallBack(const geometry_msgs::PoseStamped::ConstPtr& pose)
@@ -95,10 +95,10 @@ void Scan::velCallBack(const geometry_msgs::TwistStamped::ConstPtr& velocity)
 void Scan::scanCallBack(const sensor_msgs::LaserScan::ConstPtr& scan)
 {
 	/* use the beam facing downwards to calculate the average height */
-	float sum = 0;												/* sum of available distances detected */
-	int count = 0;												/* number of available distances detected */
-	int scan_angle = 30;										/* angle used for calculation in deg */
-	int pred_angle = 25;										/* angle used for prediction in deg */
+	float sum = 0;														/* sum of available distances detected */
+	int count = 0;														/* number of available distances detected */
+	int scan_angle = 30;													/* angle used for calculation in deg */
+	int pred_angle = 25;													/* angle used for prediction in deg */
 	bool forward = false;
 	bool backward = false;
 	float pred_sum = 0;

@@ -58,7 +58,7 @@ Quaternion q_mult(const Quaternion& _q, const Quaternion& _p)
 
 void Swap(float a, float b)
 {
-	int c;
+    float c;
 	c = a;
 	a = b;
 	b = c;

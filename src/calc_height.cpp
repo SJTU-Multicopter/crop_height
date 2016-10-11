@@ -2,6 +2,7 @@
 #include "std_msgs/Float32.h"
 #include <sensor_msgs/LaserScan.h>
 #include <geometry_msgs/PoseStamped.h>
+#include <geometry_msgs/Point32.h>
 #include <cmath>
 
 /* inline function to convert deg into rad */
@@ -54,18 +55,24 @@ public:
 	Quaternion q;
 private:
 	ros::NodeHandle n;
-		ros::Publisher CropDistance;										/* publish the distance to the crop */
-		ros::Subscriber scan_sub;											/* subscribe the Lidar data */
-		ros::Subscriber pose_sub;											/* subscribe mavros data (pose of the drone) */
+	ros::Publisher CropDistance;										/* publish the distance to the crop */
+	ros::Subscriber scan_sub;											/* subscribe the Lidar data */
+	ros::Subscriber pose_sub;											/* subscribe mavros data (pose of the drone) */
 	void scanCallBack(const sensor_msgs::LaserScan::ConstPtr& scan);		/* prototype of the callback function for Lidar messages */
 	void poseCallBack(const geometry_msgs::PoseStamped::ConstPtr& pose);	/* prototype of the callback function for pose messages */
+
+	float pre_dist1;
+	float pre_dist2;
 };
 
 Scan::Scan()
 {
-	CropDistance = n.advertise<std_msgs::Float32>("/crop_dist", 5);																/* publish the distance to the crop */
+	CropDistance = n.advertise<geometry_msgs::Point32>("/crop_dist", 5);																/* publish the distance to the crop */
 	scan_sub = n.subscribe<sensor_msgs::LaserScan>("/scan", 5, &Scan::scanCallBack, this);									/* when the data of Laser rangefinder comes, trigger the callback function */
 	pose_sub = n.subscribe<geometry_msgs::PoseStamped>("/mavros/local_position/local", 5, &Scan::poseCallBack, this);		/* subscribe the data of the pose of the drone for correcting the height */
+
+	pre_dist1 = 0.0;
+	pre_dist2 = -6.0;
 }
 
 void Scan::poseCallBack(const geometry_msgs::PoseStamped::ConstPtr& pose)
@@ -81,9 +88,15 @@ void Scan::scanCallBack(const sensor_msgs::LaserScan::ConstPtr& scan)
 {
 	/* use the beam facing downwards to calculate the average height */
 	float sum = 0;												/* sum of available distances detected */
+	float average = 0;												/* average of available distances detected */
+	float standard_error = 0;									/* standard_error of available distances detected */
 	int count = 0;												/* number of available distances detected */
 	int scan_angle = 30;										/* angle used for calculation in deg */
-	float intensities = 0;
+	float values[30];          //to store useful distance point value
+
+	float fdistance = -6.0;
+	float confidence1 = 0.0;
+	float confidence2 = 0.0;
 
 	float pitch = asin(2 * (q.q0 * q.q2 - q.q3 * q.q1));
 
@@ -91,7 +104,7 @@ void Scan::scanCallBack(const sensor_msgs::LaserScan::ConstPtr& scan)
 	for (int i = 90 - scan_angle/2 - RAD2DEG(pitch); i < 90 + scan_angle/2 - RAD2DEG(pitch); i++)
 	{
 		/* only take the values between the minimum and maximum value of the laser rangefinder */
-		if (scan->ranges[i]>scan->range_min && scan->ranges[i]<scan->range_max)
+		if (scan->ranges[i] > scan->range_min && scan->ranges[i] < scan->range_max)
 		{
 			float angle = DEG2RAD(i);
 
@@ -107,24 +120,74 @@ void Scan::scanCallBack(const sensor_msgs::LaserScan::ConstPtr& scan)
 			p_ground = q_mult(q_mult(q, p_body), q_inv(q));
 
 			/* the distance to the crop is z in the ground frame */
-			sum += p_ground.q3;
-			count++;
-
-			//intensities += scan->intensities[i];
+			//sum += p_ground.q3;
+			if(p_ground.q3 > -5.5 && p_ground.q3 < -0.3)
+			{
+				values[count] = p_ground.q3;
+				count++;
+			}
 		}		
 	}
 
+	if(count > 0)
+	{
+		/**Average**/
+		for(int i = 0; i < count; i++)
+		{
+			sum += values[count];
+		}
+		average = sum / count;
+
+		/**Varience**/
+		float total_varience = 0.0;
+		for(int i = 0; i < count; i++)
+		{
+			total_varience += (values[count] - average) * (values[count] - average);
+		}
+		standard_error = sqrt(total_varience / n);  //standard error, between(0,5.2), ideal (0,1) if crop is 1m high
+
+		if(standard_error > 1) confidence1 = 0.0;
+		else confidence1 = 1.0 - standard_error;
+	}
+	else average = -6.0;
+
+	/**average in 3 times**/
+	fdistance = (pre_dist1 + pre_dist2 + average)/3.0;
+	/**max error in 3 times**/
+	float max_error = 0.0;
+	if(fabs(pre_dist1 - fdistance) > max_error) max_error = fabs(pre_dist1 - fdistance);
+	if(fabs(pre_dist2 - fdistance) > max_error) max_error = fabs(pre_dist2 - fdistance);
+	if(fabs(average - fdistance) > max_error) max_error = fabs(average - fdistance);
+	
+	if(max_error > 0.5) confidence2 = 0.0;
+	else if(max_error < 0.1) confidence2 = 1.0;
+	else
+	{
+		confidence2 = (max_error-0.1)/0.4;
+	}
+
+	/**set vlaues**/
+	pre_dist2 = pre_dist1;
+	pre_dist1 = average;
+
+	geometry_msgs::Point32 Distance; 
+	Distance.x = fdistance;
+	Distance.y = confidence1;
+	Distance.z = confidence2;
+
 	/* publish the distance to the crop in Distance */
-	std_msgs::Float32 Distance;
-	Distance.data = sum / (count);
-	if (Distance.data == Distance.data)
+	
+	//Distance.x = sum / (count);
+
+	/*if (Distance.data == Distance.data)
 	{}
 	else
 	{
 		Distance.data = -6.0f;
-	}
+	}*/
+
 	CropDistance.publish(Distance);
-	ROS_INFO("\npitch:\t%f \ndist:\t%f \n",RAD2DEG(pitch), Distance.data);
+	ROS_INFO("\npitch:\t%f \ndist:\t%f \n",RAD2DEG(pitch), Distance.x);
 }
 
 int main(int argc, char **argv)
